@@ -1,0 +1,1127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#F4F3F1">
+<title>もちもち — デモ版</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Old+Mincho:wght@400&family=Zen+Kaku+Gothic+New:wght@300;400&display=swap">
+<style>
+:root{
+  --paper:#F4F3F1;
+  --ink:#1A1A19;
+  --ink-dim:#8A8880;
+  --ink-faint:#C6C3BD;
+  --line:#D8D5CF;
+  --accent:#5B5A56;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:"Zen Kaku Gothic New","Hiragino Sans",system-ui,sans-serif;
+  font-weight:300;
+  -webkit-font-smoothing:antialiased;
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+  touch-action:none;
+}
+
+/* ─────────── 画面 ─────────── */
+.screen{
+  position:fixed;inset:0;z-index:2;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;pointer-events:none;transition:opacity .7s ease;
+}
+.screen:not(.on){z-index:0;}
+.screen.on{opacity:1;pointer-events:auto;}
+
+/* ─────────── 1. 入力フェーズ ─────────── */
+#write .box{width:min(44rem,84vw);display:flex;flex-direction:column;}
+.hint{
+  font-size:clamp(.95rem,1.6vw,1.05rem);
+  letter-spacing:.14em;color:var(--accent);
+  margin:0 0 clamp(3rem,9vh,6rem);font-weight:300;
+}
+#input{
+  /* 100字は 3行に収まる。1行ぶん余らせて、打ち切るまで箱の高さが動かないようにする。
+     スクロールバーも、伸び縮みする入力欄も、同じだけ目障りなので両方出さない。 */
+  width:100%;min-height:calc(4 * 2.2em + 1rem);height:calc(4 * 2.2em + 1rem);
+  overflow:hidden;
+  background:transparent;border:0;border-bottom:1px solid var(--line);
+  color:var(--ink);
+  font-family:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  font-size:clamp(17px,1.5vw,20px);line-height:2.2;
+  padding:0 0 1rem;resize:none;outline:none;
+  /* body の user-select:none / touch-action:none を打ち消す。
+     これが効いたままだと iOS Safari では文字が打てない */
+  user-select:text;-webkit-user-select:text;-webkit-touch-callout:default;touch-action:auto;
+}
+#input::placeholder{color:var(--ink-faint);}
+#input:focus{border-bottom-color:var(--ink-dim);}
+.row{display:flex;align-items:center;justify-content:space-between;margin-top:1rem;}
+.count{font-size:.8rem;color:var(--ink-dim);font-variant-numeric:tabular-nums;letter-spacing:.06em;}
+.count.ok{color:var(--ink);}
+.count .say{color:var(--ink-faint);margin-left:.4em;}
+#next{
+  font-family:inherit;font-size:.85rem;font-weight:300;letter-spacing:.18em;
+  background:transparent;color:var(--ink);
+  border:1px solid var(--line);border-radius:999px;
+  padding:.55rem 1.6rem;cursor:pointer;
+  transition:opacity .25s,border-color .25s;
+}
+#next:disabled{opacity:.28;cursor:default;}
+#next:not(:disabled):hover{border-color:var(--ink-dim);}
+
+/* ─────────── 2. もちもちフェーズ ─────────── */
+/* pointer-events を切らないと、透明なキャンバスが入力欄へのクリックを全部吸う */
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;z-index:1;
+    opacity:0;pointer-events:none;transition:opacity .6s ease;}
+#gl.on{opacity:1;pointer-events:auto;}
+/* 「次へ」から結びが出るまでカーソルを消す。指の代わりが2つ画面に
+   いると、どちらを追っているのか分からなくなる。 */
+#gl.nocur{cursor:none;}
+
+/* 平文のあいだだけ出る。結びの「これはあなたがかいたことば」と
+   同じ書体・大きさ・濃さで、同じ場所に置く。装置の声は最初と最後で
+   同じところから出る、ということにしてある。
+   本文は画面の中央に左揃えで組まれているので、位置だけで見分けがつく。
+   （calc の 5.4rem は #epilogue のボタンとすき間のぶん。実測で
+   あちらの .line と 1px 差まで合わせてある。#epilogue の中身を
+   いじったら、ここも測り直すこと） */
+#memo{
+  position:fixed;z-index:4;margin:0;
+  left:50%;bottom:calc(7vh + 5.4rem);transform:translateX(-50%);
+  font-family:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  font-size:1rem;letter-spacing:.1em;color:var(--accent);
+  white-space:nowrap;
+  opacity:0;transition:opacity 1.6s ease;pointer-events:none;
+}
+#memo.on{opacity:1;}
+
+#epilogue{
+  position:fixed;left:50%;bottom:7vh;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:1.6rem;
+  opacity:0;transition:opacity 1.6s ease;pointer-events:none;text-align:center;z-index:6;
+}
+#epilogue.on{opacity:1;pointer-events:auto;}
+#epilogue .line{
+  font-family:"Zen Old Mincho",serif;font-size:1rem;color:var(--accent);letter-spacing:.1em;margin:0;
+  white-space:nowrap;   /* 折り返すと #memo と高さがずれて、対にならない */
+}
+#again{
+  font-family:inherit;font-size:.8rem;font-weight:300;letter-spacing:.18em;
+  background:transparent;color:var(--ink-dim);
+  border:1px solid var(--line);border-radius:999px;padding:.5rem 1.4rem;cursor:pointer;
+}
+#fail{
+  position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+  padding:2rem;text-align:center;font-size:.9rem;line-height:2;color:var(--accent);z-index:30;
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════ 1. 入力フェーズ ══════════ -->
+<div class="screen on" id="write">
+  <div class="box">
+    <p class="hint">きょうのことを、すこしだけかいてみて</p>
+    <textarea id="input" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+    <div class="row">
+      <span class="count" id="count">0 字</span>
+      <button id="next" disabled>次へ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 2. もちもちフェーズ ══════════ -->
+<canvas id="gl"></canvas>
+<p id="memo"></p>
+
+<div id="epilogue">
+  <p class="line">これはあなたがかいたことば</p>
+  <button id="again">もう一度</button>
+</div>
+
+<div id="fail">この端末では WebGL2 が使えませんでした。<br>Safari / Chrome の最新版でお試しください。</div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════
+   もちもち（デモ版）
+
+   ・液体ガラスの光学と「もちもち」の物理は liquid-glass-notes.html の
+     Canvas 2D 実装をそのまま GLSL に移植したもの。
+     SDF → 疑似法線 → スネルの法則 → RGB別サンプル → リムハイライト。
+     形は超楕円 × 表面ハーモニクスの r(θ) ひとつ。だから分離しない。
+   ・置換のロジックは prototype_v1.html の検証結果を踏襲。
+     既読・レンズの外・近い順。文字列検索は一切しない（位置で持つ）。
+   ・デモ版なので、本文と言い換えは下の SCRIPT に固定で書いてある。
+     入力欄に何を打っても、出てくるのは SCRIPT の文章。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════════════════
+   ここを書き換える ── 本文と対応表
+   t = そのまま出る文字列 / a = 言い換えの候補（省略すると置換対象にならない）
+   t を全部つなげたものが本文。置換後の文字数は元の ±20% を目安に。
+   ══════════════════════════════════════════════════════════════════════ */
+var SCRIPT = [
+  {t:"目がさめて",   a:["目を覚まして"]},
+  {t:"、"},
+  {t:"明かり",       a:["ひかり"]},
+  {t:"の"},
+  {t:"入らない",     a:["差し込まない"]},
+  {t:"部屋",         a:["室内"]},
+  {t:"で"},
+  {t:"時刻",         a:["時間"]},
+  {t:"を"},
+  {t:"確認する",     a:["確かめる"]},
+  {t:"。昼過ぎ。"},
+  {br:2},
+  {t:"いつも",       a:["毎日"]},
+  {t:"と同じ"},
+  {t:"食事",         a:["食べ物"]},
+  {t:"を"},
+  {t:"胃に入れて",   a:["口にして"]},
+  {t:"、今日はバイト。"},
+  {br:2},
+  {t:"子ども",       a:["子供"]},
+  {t:"たちの声が"},
+  {t:"心もとなく",   a:["頼りなく"]},
+  {t:"、"},
+  {t:"寂しかった",   a:["心細かった"]},
+  {t:"。"},
+  {t:"長生きしよう", a:["長く生きよう"]},
+  {t:"と"},
+  {t:"思いました",   a:["感じました"]},
+  {t:"。"}
+];
+
+/* 拡縮の可動域。置換語を元の語の幅に押し込むときの倍率の上下限。
+   ここを狭めると枠に収まらない語が出て、空白が残るか、隣に食われて
+   字が消える。広いほうが事故が無い。歪みそのものは仕様なので、
+   隠すために狭める必要はない（drawAtom のコメントを参照）。 */
+var SCALE_MIN = 0.40, SCALE_MAX = 3.00;
+
+/* 段落のあいだ。行送りの何倍あけるか。{br:2} で使う */
+var PARA_GAP = 0.55;
+
+var MIN_CHARS = 80, MAX_CHARS = 100;
+
+/* 演出の尺（ミリ秒） */
+var T_PLAIN   = 10000;  /* 平文のまま見せる。ここで覚えてもらう */
+var MEMO_TEXT = "わすれないで";   /* 平文のあいだ、画面の下に出る */
+var T_FOGIN   = 2200;   /* 霧が閉じる */
+var T_FOGOUT  = 3400;   /* 霧が晴れる */
+
+/* ══════════════════════════════════════════════════════════════════════
+   パラメータ ── 実機で詰めて確定した値。実行中に変わることはない。
+   調整用のスライダーは撤去したので、変えるならここを直接書き換える。
+   （スライダー・プリセット一式は git のタグ v1-tunable に残っている）
+   ══════════════════════════════════════════════════════════════════════ */
+var P = {
+  /* 文字 */
+  blur:5.0,        /* すりガラスの強さ。実測で 4未満は効かず、9では消えすぎる */
+  /* 形 ── 以下「水滴」の性格。液体ガラス研究ノートの drop プリセットを
+     白地・可読性に合わせて振り直したもの */
+  lensR:40,        /* レンズの半短径（CSS px） */
+  ratio:1.12,      /* 横長さ。1.12 でほぼ真円 */
+  form:2.0,        /* 角ばり（超楕円の指数）2.0 は素の楕円。4で餅、9でApple UI */
+  wob:0.15,        /* うねりの深さ */
+  mode:2,          /* うねりの山の数。2 が最も液滴らしい */
+  grow:5.0,        /* 1置換あたりの成長（CSS px）14置換で 40 → 110 まで育つ */
+  /* もちもち */
+  mochi:0.94,      /* 粘り＝バネの減衰の少なさ */
+  speed:1.60,      /* 揺れの速さ */
+  bounce:1.10,     /* 全体の弾み（n=0 等方モード） */
+  followK:0.05,    /* 指への追従。小さいほど遅れて、粘って見える */
+  /* ガラス */
+  ior:1.33,        /* 屈折率。1.33 は水。ガラスなら 1.45〜1.52 */
+  edge:14,         /* 屈折の効く帯の幅（CSS px）細いほど縁で強く曲がる */
+  bend:38,         /* 屈折の強さ */
+  chroma:0.20,     /* 色収差。黒文字を白地でずらすと色が出やすい。気づかれない量が正解 */
+  frost:0.02,      /* レンズの中のすりガラス量。水滴なのでほぼ素通し */
+  spec:1.35,       /* ハイライト。白地なので強めでないと縁が立たない */
+  sss:0.05,        /* 乳白色の回り込み。水滴では効かせない */
+  shadow:1.05      /* 落ち影。これが無いと水滴が紙に沈む */
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   DOM
+   ══════════════════════════════════════════════════════════════════════ */
+var $ = function(id){ return document.getElementById(id); };
+var writeS = $("write"), glc = $("gl"), epi = $("epilogue"), memo = $("memo");
+var input = $("input"), countEl = $("count"), nextBtn = $("next");
+
+var DPR = 1, cssW = 0, cssH = 0, W = 0, H = 0;
+
+/* ══════════════════════════════════════════════════════════════════════
+   1. 入力フェーズ
+   ══════════════════════════════════════════════════════════════════════ */
+function updateCount(){
+  var n = input.value.replace(/\s/g, "").length;
+  var say = "";
+  if(n > MAX_CHARS) say = '<span class="say">（長すぎる）</span>';
+  else if(n > 0 && n < MIN_CHARS) say = '<span class="say">（もうすこし）</span>';
+  countEl.innerHTML = n + " 字" + say;
+  var ok = (n >= MIN_CHARS && n <= MAX_CHARS);
+  countEl.classList.toggle("ok", ok);
+  nextBtn.disabled = !ok;
+  fitInput();
+}
+
+/* 画面が細いと 100字が4行を超える。そのときだけ箱を伸ばす。
+   min-height があるので、普通の画面では一度も動かない。 */
+function fitInput(){
+  input.style.height = "auto";
+  input.style.height = input.scrollHeight + "px";
+}
+input.addEventListener("input", updateCount);
+/* デモ用の仮台本。Ctrl+Enter で流し込める（打つ練習をしないで動かしたいとき用）。
+   本番でも、IME が暴れたときの逃げ道になる。 */
+var SCRIPT_TEXT = SCRIPT.map(function(s){ return s.br ? "\n\n" : s.t; }).join("");
+
+input.addEventListener("keydown", function(e){
+  if(STATE !== "idle") return;
+  /* IME の変換確定の Enter で送信してしまわないこと。日本語入力の必須条件 */
+  if(e.isComposing || e.keyCode === 229) return;
+  if(e.key === "Enter" && (e.ctrlKey || e.metaKey)){
+    e.preventDefault();
+    input.value = SCRIPT_TEXT;
+    updateCount();
+    return;
+  }
+  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); if(!nextBtn.disabled) begin(); }
+});
+nextBtn.addEventListener("click", begin);
+$("again").addEventListener("click", function(){ location.reload(); });
+setTimeout(function(){ try{ input.focus(); }catch(e){} }, 300);
+
+/* ══════════════════════════════════════════════════════════════════════
+   2. 文字を描く面（本物の DOM ではなく、自前で組んだ 2D キャンバス）
+      デモ版は本文も配置も決まっているので、DOM である必要がない。
+      テクスチャにできれば、屈折させられる。
+   ══════════════════════════════════════════════════════════════════════ */
+var tc = document.createElement("canvas");
+var tx = tc.getContext("2d", { willReadFrequently:false });
+
+var atoms = [];        /* {t, alt, x, y, w, replaced, visited} */
+var slots = [];        /* 置換できる atom だけ */
+var doneN = 0, totalN = 0;
+var fontPx = 24, lineH = 62;
+
+/* 行頭に来てはいけない文字（ぶら下げる） */
+var KINSOKU = "、。，．・：；？！ゝゞーぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ）」』】〉》”’,.";
+
+function measure(s){ return tx.measureText(s).width; }
+
+function layout(){
+  fontPx = Math.round(Math.max(19, Math.min(26, cssW * 0.026)) * DPR);
+  lineH  = Math.round(fontPx * 2.6);
+  tx.setTransform(1,0,0,1,0,0);
+  tx.font = fontPx + 'px "Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif';
+  tx.textBaseline = "alphabetic";
+
+  var blockW = Math.min(760 * DPR, W * 0.86);
+
+  /* atom に割る。言い換えのある部分は割らない（行をまたがせない）。
+     {br:…} は改行そのものなので atom ではあるが文字を持たない。 */
+  atoms = []; slots = [];
+  for(var i = 0; i < SCRIPT.length; i++){
+    var p = SCRIPT[i];
+    if(p.br){
+      atoms.push({ brk:p.br, t:"", w:0, slot:false });
+    }else if(p.a && p.a.length){
+      atoms.push({ t:p.t, alt:p.a.slice(), w:0, x:0, y:0, replaced:false, visited:false, slot:true });
+    }else{
+      for(var j = 0; j < p.t.length; j++){
+        atoms.push({ t:p.t.charAt(j), alt:null, w:0, x:0, y:0, slot:false });
+      }
+    }
+  }
+
+  /* 行に流す（禁則文字はぶら下げる）。
+     gaps[i] は「その行の前に、行送りの何倍あけるか」。 */
+  var lines = [[]], gaps = [0], x = 0;
+  for(var k = 0; k < atoms.length; k++){
+    var a = atoms[k];
+    if(a.brk){
+      lines.push([]); gaps.push(a.brk >= 2 ? PARA_GAP : 0); x = 0;
+      continue;
+    }
+    a.w = measure(a.t);
+    var hang = (a.t.length === 1 && KINSOKU.indexOf(a.t) >= 0);
+    if(x + a.w > blockW && x > 0 && !hang){ lines.push([]); gaps.push(0); x = 0; }
+    a.x = x; x += a.w;
+    lines[lines.length - 1].push(a);
+  }
+
+  var extra = 0;
+  for(var gi = 0; gi < gaps.length; gi++) extra += gaps[gi];
+
+  var totalH = (lines.length + extra) * lineH;
+  var startX = Math.round((W - blockW) / 2);
+  var startY = Math.round((H - totalH) / 2 + fontPx * 0.86);
+  var acc = 0;
+  for(var li = 0; li < lines.length; li++){
+    acc += gaps[li];
+    for(var ai = 0; ai < lines[li].length; ai++){
+      var at = lines[li][ai];
+      at.x += startX;
+      at.y = Math.round(startY + (li + acc) * lineH);
+      if(at.slot) slots.push(at);
+    }
+  }
+  totalN = slots.length;
+}
+
+/* 文字を持つ atom だけ。改行 atom には y が無い */
+function textAtoms(){
+  return atoms.filter(function(a){ return !a.brk; });
+}
+
+function paintAll(){
+  tx.setTransform(1,0,0,1,0,0);
+  tx.fillStyle = "#F4F3F1";
+  tx.fillRect(0, 0, W, H);
+  tx.fillStyle = "#1A1A19";
+  tx.font = fontPx + 'px "Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif';
+  tx.textBaseline = "alphabetic";
+  for(var i = 0; i < atoms.length; i++){
+    var a = atoms[i];
+    if(a.brk) continue;
+    drawAtom(a, a.t);
+  }
+}
+
+/* 幅を固定したまま中身だけ入れ替える。行送りは起きない。
+
+   ここで字数の違う語を枠に押し込むので、置換された箇所は横に伸び縮みする。
+   これは直さないこと。作者の判断で仕様。文章の一部だけが引き伸ばされている
+   のは不気味で、「見えないところで何かが起こった」という怖さを担っている。
+   対応表の字数を揃えれば消せてしまうので、揃えないこと。 */
+function drawAtom(a, str){
+  tx.setTransform(1,0,0,1,0,0);
+  tx.fillStyle = "#F4F3F1";
+  tx.fillRect(a.x - 1, a.y - fontPx * 1.05, a.w + 2, fontPx * 1.45);
+  tx.fillStyle = "#1A1A19";
+  var nw = measure(str);
+  var sx = nw > 0 ? Math.max(SCALE_MIN, Math.min(SCALE_MAX, a.w / nw)) : 1;
+  tx.save();
+  tx.translate(a.x, a.y);
+  tx.scale(sx, 1);
+  tx.fillText(str, 0, 0);
+  tx.restore();
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   3. WebGL
+   ══════════════════════════════════════════════════════════════════════ */
+var gl = null;
+var progMain = null, progBlur = null;
+var texSharp = null, texContour = null;
+var fboA = null, fboB = null, texA = null, texB = null;
+var uM = {}, uB = {};
+var NA = 512;
+var contourData = new Float32Array(NA * 2);
+
+var VS = [
+"#version 300 es",
+"void main(){",
+"  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));",
+"  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);",
+"}"].join("\n");
+
+var FS_BLUR = [
+"#version 300 es",
+"precision highp float;",
+"uniform sampler2D uSrc;",
+"uniform vec2 uOut;",
+"uniform vec2 uDir;",
+"uniform float uStep;",
+"uniform float uFlip;",
+"out vec4 o;",
+"void main(){",
+"  vec2 uv = gl_FragCoord.xy / uOut;",
+"  vec2 s  = mix(uv, vec2(uv.x, 1.0 - uv.y), uFlip);",
+"  vec2 tx = uDir / uOut;",
+"  vec3 acc = vec3(0.0); float ws = 0.0;",
+"  for(int i = -6; i <= 6; i++){",
+"    float fi = float(i);",
+"    float w = exp(-fi * fi / 18.0);",
+"    acc += texture(uSrc, s + tx * uStep * fi).rgb * w;",
+"    ws += w;",
+"  }",
+"  o = vec4(acc / ws, 1.0);",
+"}"].join("\n");
+
+var FS_MAIN = [
+"#version 300 es",
+"precision highp float;",
+"uniform sampler2D uSharp;",
+"uniform sampler2D uBlur;",
+"uniform sampler2D uContour;",
+"uniform vec2  uRes;",
+"uniform vec2  uCenter;",
+"uniform float uFog;",
+"uniform float uAlive;",
+"uniform float uEdge, uIor, uBend, uChroma, uFrost, uSpec, uSSS, uShadow;",
+"uniform float uRMax, uNoise, uGrain;",
+"out vec4 outColor;",
+"const float TAU = 6.28318530718;",
+
+"float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }",
+"float vnoise(vec2 p){",
+"  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+"  return mix(mix(hash(i), hash(i + vec2(1,0)), f.x),",
+"             mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);",
+"}",
+
+/* 輪郭 r(θ) と dr/dθ を取り出す（512点、線形補間） */
+"vec2 contour(float th){",
+"  float fi = th / TAU * 512.0;",
+"  float i0 = floor(fi);",
+"  float fr = fi - i0;",
+"  int a = int(mod(i0, 512.0));",
+"  int b = int(mod(i0 + 1.0, 512.0));",
+"  vec2 A = texelFetch(uContour, ivec2(a, 0), 0).rg;",
+"  vec2 B = texelFetch(uContour, ivec2(b, 0), 0).rg;",
+"  return mix(A, B, fr);",
+"}",
+
+/* 符号付き距離と外向き法線。n ∝ r̂ − (R'/R)·θ̂ */
+"vec3 field(vec2 rel){",
+"  float len = max(length(rel), 1e-4);",
+"  float th = atan(rel.y, rel.x); if(th < 0.0) th += TAU;",
+"  vec2 c = contour(th);",
+"  float R = max(c.x, 1e-3), Rp = c.y;",
+"  float q = Rp / R;",
+"  vec2 ax = rel / len;",
+"  float g1 = ax.x + q * ax.y;",
+"  float g2 = ax.y - q * ax.x;",
+"  float gl = max(length(vec2(g1, g2)), 1e-6);",
+"  return vec3((len - R) / gl, g1 / gl, g2 / gl);",
+"}",
+
+"void main(){",
+"  vec2 px  = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);",
+"  vec2 uvT = px / uRes;",
+"  vec2 uvB = vec2(uvT.x, 1.0 - uvT.y);",
+
+/* すりガラス : ぼかしただけでは板ガラス。わずかに座標も乱す */
+"  vec2 nz = vec2(vnoise(px * 0.045), vnoise(px * 0.045 + 41.0)) - 0.5;",
+"  vec3 sharp = texture(uSharp, uvT).rgb;",
+"  vec3 frost = texture(uBlur, uvB + nz * uNoise / uRes * vec2(1.0, -1.0)).rgb;",
+"  vec3 col = mix(sharp, frost, uFog);",
+
+"  vec2 rel = px - uCenter;",
+"",
+
+/* 落ち影 : これがないと水滴が紙に沈む */
+/* 影もレンズも、水滴の周りだけで計算する。全画面で field() を2回
+   呼ぶと iPad で落ちる。 */
+"  float rl = length(rel);",
+"  if(uAlive > 0.001 && rl < uRMax + 80.0){",
+"    vec3 sh = field(rel - vec2(0.0, 16.0));",
+"    float sm = smoothstep(0.0, 52.0, sh.x);",
+"    col *= mix(1.0 - 0.15 * uShadow * uAlive, 1.0, sm);",
+"  }",
+
+"  if(uAlive > 0.001 && rl < uRMax + 2.0){",
+"    vec3 f = field(rel);",
+"    float d = f.x; vec2 n = vec2(f.y, f.z);",
+"    if(d <= 0.75){",
+"      float cov = clamp(0.5 - d, 0.0, 1.0) * uAlive;",
+"      float tt  = clamp(-d / uEdge, 0.0, 1.0);",
+
+/* 断面プロファイル : 単純な球面より lip 寄り。縁だけ強く曲がる */
+"      float u  = 1.0 - tt;",
+"      float u4 = max(1.0 - u * u * u * u, 1e-4);",
+"      float slope = (u * u * u) * pow(u4, -0.75);",
+"      float th1 = atan(slope * 1.15);",
+"      float s2  = min(sin(th1) / uIor, 1.0);",
+"      float th2 = asin(s2);",
+"      float disp = clamp(uBend * tan(th1 - th2), 0.0, uEdge * 2.2);",
+
+/* 屈折 : ぼかすのではなく、背後の座標をずらす */
+"      vec2 sp = px + n * disp;",
+"      vec3 g;",
+"      if(uChroma > 0.001){",
+"        g.r = texture(uSharp, (px + n * disp * (1.0 + uChroma * 0.06)) / uRes).r;",
+"        g.g = texture(uSharp, sp / uRes).g;",
+"        g.b = texture(uSharp, (px + n * disp * (1.0 - uChroma * 0.06)) / uRes).b;",
+"      } else {",
+"        g = texture(uSharp, sp / uRes).rgb;",
+"      }",
+
+"      float fmix = uFrost * (0.35 + 0.65 * (1.0 - tt));",
+"      vec2 spb = vec2(sp.x, uRes.y - sp.y) / uRes;",
+"      g = mix(g, texture(uBlur, spb).rgb, fmix);",
+
+"      g = g * 0.965 + vec3(0.026, 0.028, 0.032);",
+"      float e1 = 1.0 - tt, e2 = e1 * e1;",
+
+/* 乳白色の回り込み（擬似SSS）。白地なので控えめに */
+"      g += uSSS * 0.11 * e1 * (1.0 - tt * 0.42) * vec3(1.0, 0.97, 0.93);",
+
+/* 光 : 細いリム＋広いつや、反対側の抜け、影側の締まり */
+"      vec2 L = vec2(cos(-2.35), sin(-2.35));",
+"      float dp = dot(n, L);",
+"      float hi, term = 0.0;",
+"      if(dp > 0.0){",
+"        float dp3 = dp * dp * dp;",
+"        hi = (pow(dp, 14.0) + dp3 * 0.40) * e2;",
+"      } else {",
+"        float nd = -dp, nd2 = nd * nd, nd4 = nd2 * nd2;",
+"        hi = nd4 * nd4 * e2 * 0.45;",
+"        term = nd2 * e1 * 0.16;",
+"      }",
+"      g += uSpec * hi - uSpec * term * 0.30;",
+"      col = mix(col, clamp(g, 0.0, 1.0), cov);",
+"    }",
+"  }",
+
+"  col *= 1.0 - uGrain * (hash(floor(px)) - 0.5);",
+"  outColor = vec4(col, 1.0);",
+"}"].join("\n");
+
+function shader(type, src){
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s), src);
+    return null;
+  }
+  return s;
+}
+function program(vs, fs){
+  var p = gl.createProgram();
+  gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)){
+    console.error(gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+function uniforms(p, names){
+  var o = {};
+  for(var i = 0; i < names.length; i++) o[names[i]] = gl.getUniformLocation(p, names[i]);
+  return o;
+}
+function makeTex(filter){
+  var t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
+function initGL(){
+  gl = glc.getContext("webgl2", { alpha:false, antialias:false, preserveDrawingBuffer:false });
+  if(!gl){ $("fail").style.display = "flex"; return false; }
+
+  progMain = program(VS, FS_MAIN);
+  progBlur = program(VS, FS_BLUR);
+  if(!progMain || !progBlur){ $("fail").style.display = "flex"; return false; }
+
+  uM = uniforms(progMain, ["uSharp","uBlur","uContour","uRes","uCenter","uFog","uAlive",
+    "uEdge","uIor","uBend","uChroma","uFrost","uSpec","uSSS","uShadow","uRMax","uNoise","uGrain"]);
+  uB = uniforms(progBlur, ["uSrc","uOut","uDir","uStep","uFlip"]);
+
+  texSharp   = makeTex(gl.LINEAR);
+  texA       = makeTex(gl.LINEAR);
+  texB       = makeTex(gl.LINEAR);
+  texContour = makeTex(gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, texContour);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, NA, 1, 0, gl.RG, gl.FLOAT, contourData);
+
+  fboA = gl.createFramebuffer();
+  fboB = gl.createFramebuffer();
+  return true;
+}
+
+var halfW = 1, halfH = 1;
+
+function resizeGL(){
+  gl.bindTexture(gl.TEXTURE_2D, texSharp);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc);
+
+  halfW = Math.max(2, Math.floor(W / 2));
+  halfH = Math.max(2, Math.floor(H / 2));
+  var pair = [[texA, fboA], [texB, fboB]];
+  for(var i = 0; i < 2; i++){
+    gl.bindTexture(gl.TEXTURE_2D, pair[i][0]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, halfW, halfH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, pair[i][1]);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pair[i][0], 0);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+/* テクスチャを上げ直して、ぼかしも作り直す。文字が変わったときだけ走る。 */
+function uploadText(){
+  gl.bindTexture(gl.TEXTURE_2D, texSharp);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc);
+  buildBlur();
+}
+
+function buildBlur(){
+  var step = Math.max(0.6, P.blur * DPR * 0.5 / 3.0);
+  gl.useProgram(progBlur);
+  gl.uniform1i(uB.uSrc, 0);
+  gl.uniform2f(uB.uOut, halfW, halfH);
+  gl.uniform1f(uB.uStep, step);
+  gl.viewport(0, 0, halfW, halfH);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSharp);
+  gl.uniform2f(uB.uDir, 1, 0); gl.uniform1f(uB.uFlip, 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+  gl.bindTexture(gl.TEXTURE_2D, texA);
+  gl.uniform2f(uB.uDir, 0, 1); gl.uniform1f(uB.uFlip, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  /* 2周させて、9タップでは届かない太さのぼかしにする */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboA);
+  gl.bindTexture(gl.TEXTURE_2D, texB);
+  gl.uniform2f(uB.uDir, 1, 0); gl.uniform1f(uB.uFlip, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB);
+  gl.bindTexture(gl.TEXTURE_2D, texA);
+  gl.uniform2f(uB.uDir, 0, 1); gl.uniform1f(uB.uFlip, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   4. もちもち ── 液滴の表面振動モード
+      高次ほど硬く・速く減衰する。ひとつの弾みの中で高い周波数から
+      順に消えていき、最後に大きなうねりだけが残る。これが粘っこさ。
+   ══════════════════════════════════════════════════════════════════════ */
+var NM = 5;
+var mc = new Float32Array(NM), ms = new Float32Array(NM);
+var mcv = new Float32Array(NM), msv = new Float32Array(NM);
+var sqA = 1, sqB = 1, sqAv = 0, sqBv = 0;
+var vol = 1, volv = 0;
+var ox = 0, oy = 0, ovx = 0, ovy = 0;
+var cx = 0, cy = 0, tgx = 0, tgy = 0, fvx = 0, fvy = 0;
+var Rt = new Float32Array(NA + 2), Rd = new Float32Array(NA + 2);
+var maxR = 120, refDs = 100;
+var TAU = Math.PI * 2;
+
+function baseRadius(){ return (P.lensR + doneN * P.grow) * DPR; }
+
+function physics(time, dt){
+  var k = Math.min(dt, 26) / 16.7; if(!(k > 0)) k = 0;
+  var m = P.mochi;
+  var stiff = 0.055 * P.speed * P.speed;
+  var damp  = 0.300 - 0.255 * m;
+
+  /* 指への追従。オーバーシュートさせるから粘って見える */
+  fvx += (tgx - cx) * P.followK; fvx *= 0.76; cx += fvx;
+  fvy += (tgy - cy) * P.followK; fvy *= 0.76; cy += fvy;
+
+  var sel = P.mode | 0;
+  for(var i = 0; i < NM; i++){
+    var n  = i + 2;
+    var kn = stiff * (1 + (n - 2) * 0.85);
+    var dn = damp  * (1 + (n - 2) * 0.30);
+    var w  = (n === sel) ? P.wob : P.wob * 0.16 / (1 + (n - 2));
+    var tcv = w * Math.cos(time * 0.00047 * (1 + i * 0.31) + i * 2.1);
+    var tsv = w * Math.sin(time * 0.00039 * (1 + i * 0.27) + i * 1.3);
+    mcv[i] += ((tcv - mc[i]) * kn - mcv[i] * dn) * k; mc[i] += mcv[i] * k;
+    msv[i] += ((tsv - ms[i]) * kn - msv[i] * dn) * k; ms[i] += msv[i] * k;
+
+    /* 位相を進める。触れた点で生まれた波が輪郭を回って全体に伝わる */
+    var dphi = 0.030 * P.speed * P.mochi * (1 + (n - 2) * 0.18) * k;
+    var c_ = mc[i],  s_ = ms[i];   mc[i]  = c_ - s_ * dphi;  ms[i]  = s_ + c_ * dphi;
+    var cv = mcv[i], sv = msv[i];  mcv[i] = cv - sv * dphi;  msv[i] = sv + cv * dphi;
+  }
+
+  /* 等方モード : どこを押しても body 全体がへこんで戻る */
+  volv += ((1 - vol) * stiff * 1.35 - volv * damp) * k; vol += volv * k;
+  if(vol < 0.60) vol = 0.60; if(vol > 1.55) vol = 1.55;
+
+  /* 移動に応じたスカッシュ＆ストレッチ */
+  var st = Math.min(Math.abs(fvx) * 0.06 * m, 0.26);
+  var kA = stiff * 1.5, dA = damp * 1.1;
+  sqAv += (((1 + st) - sqA) * kA - sqAv * dA) * k; sqA += sqAv * k;
+  sqBv += (((1 - st * 0.68) - sqB) * kA - sqBv * dA) * k; sqB += sqBv * k;
+  if(sqA < 0.55) sqA = 0.55; if(sqB < 0.55) sqB = 0.55;
+
+  /* 本体ごと逃げてから戻る反動 */
+  ovx += (-ox * stiff * 2.2 - ovx * damp * 1.4) * k; ox += ovx * k;
+  ovy += (-oy * stiff * 2.2 - ovy * damp * 1.4) * k; oy += ovy * k;
+}
+
+function poke(mx, my, power){
+  var dx = mx - (cx + ox), dy = my - (cy + oy);
+  var th = Math.atan2(dy, dx);
+  var g = power * (0.35 + 0.75 * P.mochi);
+  var ct = Math.cos(th), st = Math.sin(th);
+
+  /* ① 等方 : まず全体がへこむ。ひとつの塊に見えるための一手 */
+  volv -= g * 0.075 * P.bounce;
+
+  /* ② 局所 : 触れた角度に −Σcos(n(θ−θ₀))。押した場所がへこむ。
+        弧長で正規化しないと、細長い形の尖った端だけが過剰に反応する */
+  var ia = th < 0 ? th + TAU : th;
+  var i0 = (ia * (NA / TAU)) | 0; if(i0 >= NA) i0 = NA - 1;
+  var ds = Math.sqrt(Rt[i0] * Rt[i0] + Rd[i0] * Rd[i0]);
+  var nrm = refDs / Math.max(ds, 1);
+  if(nrm < 0.45) nrm = 0.45; if(nrm > 2.0) nrm = 2.0;
+  for(var i = 0; i < NM; i++){
+    var n = i + 2;
+    var amp = g * nrm * 0.045 / (1 + (n - 2) * 0.45);
+    mcv[i] -= amp * Math.cos(n * th);
+    msv[i] -= amp * Math.sin(n * th);
+  }
+
+  /* ③ 反動 : 指から逃げる向きへ */
+  ovx -= ct * g * 3.4; ovy -= st * g * 3.4;
+
+  /* ④ 体積保存 : 押した軸に潰れ、直交方向に膨らむ */
+  var ac = Math.abs(ct), as = Math.abs(st);
+  sqAv += (as * 0.045 - ac * 0.060) * g;
+  sqBv += (ac * 0.045 - as * 0.060) * g;
+}
+
+
+/* 超楕円 × 表面ハーモニクス。閉じた r(θ) ひとつなので分離しない */
+function buildShape(){
+  var n = P.form, inv = 1 / n;
+  var BASE = baseRadius();
+  var a = BASE * P.ratio * sqA * vol, b = BASE * sqB * vol;
+  var mx = 0, mn = 1e9, step = TAU / NA;
+  for(var i = 0; i < NA; i++){
+    var th = i * step, ct = Math.cos(th), stv = Math.sin(th);
+    var base = 1 / Math.pow(Math.pow(Math.abs(ct) / a, n) + Math.pow(Math.abs(stv) / b, n), inv);
+    var w = 1;
+    for(var j = 0; j < NM; j++){
+      var kk = (j + 2) * th;
+      w += mc[j] * Math.cos(kk) + ms[j] * Math.sin(kk);
+    }
+    if(w < 0.40) w = 0.40;
+    var R = base * w;
+    Rt[i] = R;
+    if(R > mx) mx = R; if(R < mn) mn = R;
+  }
+  Rt[NA] = Rt[0]; Rt[NA + 1] = Rt[1];
+  var h2 = 2 * step, dsSum = 0;
+  for(var i2 = 0; i2 < NA; i2++){
+    var Rdi = (Rt[(i2 + 1) % NA] - Rt[(i2 + NA - 1) % NA]) / h2;
+    Rd[i2] = Rdi;
+    dsSum += Math.sqrt(Rt[i2] * Rt[i2] + Rdi * Rdi);
+    contourData[i2 * 2]     = Rt[i2];
+    contourData[i2 * 2 + 1] = Rdi;
+  }
+  Rd[NA] = Rd[0]; Rd[NA + 1] = Rd[1];
+  maxR = mx; refDs = dsSum / NA;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   5. 置換 ── 既読で、いま見えていない場所を狙う
+   ══════════════════════════════════════════════════════════════════════ */
+/* レンズは横長なので、maxR の円で内外を判定すると上下がずれる。
+   その角度の輪郭 r(θ) で割った比で見る。1 未満なら水滴の下。 */
+function lensRatio(a){
+  var dx = (a.x + a.w / 2) - (cx + ox);
+  var dy = (a.y - fontPx * 0.35) - (cy + oy);
+  var len = Math.hypot(dx, dy); if(len < 1e-4) return 0;
+  var th = Math.atan2(dy, dx); if(th < 0) th += TAU;
+  var i = (th * (NA / TAU)) | 0; if(i >= NA) i = NA - 1;
+  return len / Math.max(Rt[i], 1e-3);
+}
+
+function markVisited(){
+  for(var i = 0; i < slots.length; i++){
+    var s = slots[i];
+    if(!s.visited && lensRatio(s) < 0.80) s.visited = true;
+  }
+}
+
+function pickAndReplace(){
+  var pool = [], rest = [];
+  for(var i = 0; i < slots.length; i++){
+    var s = slots[i]; if(s.replaced) continue;
+    var d = lensRatio(s);
+    rest.push({ s:s, d:d });
+    if(d > 1.05) pool.push({ s:s, d:d, vis:s.visited });
+  }
+  if(!rest.length) return false;
+
+  var pick;
+  if(pool.length){
+    var seen = pool.filter(function(p){ return p.vis; });
+    var use = (seen.length ? seen : pool).sort(function(a, b){ return a.d - b.d; }).slice(0, 4);
+    pick = use[(Math.random() * use.length) | 0];
+  }else{
+    /* 未置換が全部レンズの下に入った終盤の詰み回避。
+       ここが無いと、タップしても何も起きず作品が終われない。 */
+    pick = rest.sort(function(a, b){ return b.d - a.d; })[0];
+  }
+
+  var a = pick.s;
+  var alt = a.alt[(Math.random() * a.alt.length) | 0];
+  drawAtom(a, alt);
+  a.t = alt; a.replaced = true;
+  doneN++;
+  uploadText();
+  if(doneN >= totalN) finish();
+  return true;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   6. 音 ── iPad に振動APIは無い。もちもちは音で作る。
+      アタックを鈍らせることが、そのまま遅延対策になる。
+   ══════════════════════════════════════════════════════════════════════ */
+var ac = null;
+
+function initAudio(){
+  try{
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    if(ac.state === "suspended") ac.resume();
+  }catch(e){ ac = null; }
+}
+
+function thud(power){
+  if(!ac) return;
+  var t0 = ac.currentTime;
+  var g = ac.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22 * power, t0 + 0.045);   /* 遅いアタック */
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+  var lp = ac.createBiquadFilter();
+  lp.type = "lowpass"; lp.frequency.value = 240;
+  var o1 = ac.createOscillator(); o1.type = "sine"; o1.frequency.setValueAtTime(74, t0);
+  o1.frequency.exponentialRampToValueAtTime(52, t0 + 0.36);
+  var o2 = ac.createOscillator(); o2.type = "sine"; o2.frequency.setValueAtTime(112, t0);
+  var g2 = ac.createGain(); g2.gain.value = 0.35;
+  o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(ac.destination);
+  o1.start(t0); o2.start(t0); o1.stop(t0 + 0.5); o2.stop(t0 + 0.5);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   7. 進行
+   ══════════════════════════════════════════════════════════════════════ */
+var STATE = "idle";     /* idle / plain / fogin / play / fogout / end */
+var stateT = 0;
+var fog = 0, alive = 0;
+var running = false;
+
+function begin(){
+  initAudio();
+  resize();                      /* layout() が atoms を組み直すので置換も消える */
+
+  /* 数え直しと結びの片付け。通常は「もう一度」でリロードするので
+     ここを通らないが、begin() が二度走っても成立するようにしておく。 */
+  doneN = 0;
+  epi.classList.remove("on");
+
+  writeS.classList.remove("on");
+  glc.classList.add("on");
+  /* 文章の真ん中から始める。ここが外れていると、霧が閉じた瞬間に
+     水滴が何も拾っていない状態で出てきてしまう */
+  var ys = textAtoms().map(function(a){ return a.y; });
+  cx = tgx = W * 0.5;
+  cy = tgy = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2 - fontPx * 0.35;
+  fvx = fvy = ox = oy = ovx = ovy = 0;
+
+  /* 入力欄からフォーカスを外す。外さないと、この先の Enter が
+     入力欄のハンドラに食われて begin() がもう一度走る。 */
+  try{ input.blur(); }catch(e){}
+
+  memo.textContent = MEMO_TEXT;
+  setTimeout(function(){ if(STATE === "plain") memo.classList.add("on"); }, 900);
+
+  STATE = "plain"; stateT = performance.now();
+  updateCursor();
+  if(!running){ running = true; requestAnimationFrame(loop); }
+}
+
+/* 霧を閉じにいく。10秒待たずに Enter でもここへ来る */
+function enterFogin(now){
+  if(STATE !== "plain") return;
+  memo.classList.remove("on");
+  STATE = "fogin"; stateT = now;
+}
+
+function finish(){
+  STATE = "fogout"; stateT = performance.now();
+  updateCursor();
+}
+
+/* 「次へ」を押した瞬間から、結びが出るまでカーソルを消す。
+   平文を読ませているあいだに矢印が画面に居るのは、それだけで
+   「これはソフトだ」という合図になってしまう。
+   ただしパネルを開けているあいだは出しておく。消えたまま画面を
+   横断してパネルまで辿り着くのは無理がある。 */
+function updateCursor(){
+  var during = (STATE !== "idle" && STATE !== "end");
+  glc.classList.toggle("nocur", during);
+}
+
+var lastT = -1;
+function loop(now){
+  requestAnimationFrame(loop);
+  var dt = (lastT < 0) ? 16.7 : (now - lastT);
+  lastT = now;
+
+  var el = now - stateT;
+  if(STATE === "plain"){
+    fog = 0; alive = 0;
+    if(el > T_PLAIN) enterFogin(now);
+  }else if(STATE === "fogin"){
+    var p = Math.min(1, el / T_FOGIN);
+    fog = p * p * (3 - 2 * p);
+    alive = Math.max(0, Math.min(1, (el - T_FOGIN * 0.55) / 900));
+    if(el > T_FOGIN + 900){ STATE = "play"; stateT = now; updateCursor(); }
+  }else if(STATE === "play"){
+    fog = 1; alive = 1;
+  }else if(STATE === "fogout"){
+    var q = Math.min(1, el / T_FOGOUT);
+    fog = 1 - q * q * (3 - 2 * q);
+    alive = Math.max(0, 1 - el / 1400);
+    if(el > T_FOGOUT + 400){
+      STATE = "end"; stateT = now;
+      updateCursor();          /* 「もう一度」を押させるので、ここで戻す */
+      epi.classList.add("on");
+    }
+  }
+
+  physics(now, dt);
+  buildShape();
+  if(STATE === "play") markVisited();
+  draw();
+}
+
+function draw(){
+  gl.bindTexture(gl.TEXTURE_2D, texContour);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NA, 1, gl.RG, gl.FLOAT, contourData);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(progMain);
+
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texSharp);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texB);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texContour);
+  gl.uniform1i(uM.uSharp, 0); gl.uniform1i(uM.uBlur, 1); gl.uniform1i(uM.uContour, 2);
+
+  gl.uniform2f(uM.uRes, W, H);
+  gl.uniform2f(uM.uCenter, cx + ox, cy + oy);
+  gl.uniform1f(uM.uFog, fog);
+  gl.uniform1f(uM.uAlive, alive);
+  gl.uniform1f(uM.uEdge, P.edge * DPR);
+  gl.uniform1f(uM.uIor, P.ior);
+  gl.uniform1f(uM.uBend, P.bend * DPR);
+  gl.uniform1f(uM.uChroma, P.chroma);
+  gl.uniform1f(uM.uFrost, P.frost);
+  gl.uniform1f(uM.uSpec, P.spec);
+  gl.uniform1f(uM.uSSS, P.sss);
+  gl.uniform1f(uM.uShadow, P.shadow);
+  gl.uniform1f(uM.uRMax, maxR);
+  gl.uniform1f(uM.uNoise, 2.2 * DPR);
+  gl.uniform1f(uM.uGrain, 0.022);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   8. 入力
+   ══════════════════════════════════════════════════════════════════════ */
+var dragging = false;
+
+function toPx(e){
+  var r = glc.getBoundingClientRect();
+  return { x:(e.clientX - r.left) * DPR, y:(e.clientY - r.top) * DPR };
+}
+glc.addEventListener("pointerdown", function(e){
+  if(STATE !== "play") return;
+  e.preventDefault();
+  dragging = true;
+  try{ glc.setPointerCapture(e.pointerId); }catch(err){}
+  var p = toPx(e);
+  tgx = p.x; tgy = p.y;
+  poke(p.x, p.y, 1);
+  thud(1);
+  pickAndReplace();
+});
+glc.addEventListener("pointermove", function(e){
+  if(STATE !== "play") return;
+  if(!dragging && e.pointerType !== "mouse") return;
+  var p = toPx(e);
+  tgx = p.x; tgy = p.y;
+});
+glc.addEventListener("pointerup", function(e){ dragging = false; });
+glc.addEventListener("pointercancel", function(e){ dragging = false; });
+document.addEventListener("touchmove", function(e){
+  if(e.target === input) return;          /* 入力欄の中だけはスクロールさせる */
+  e.preventDefault();
+}, { passive:false });
+document.addEventListener("gesturestart", function(e){ e.preventDefault(); });
+
+/* Enter で霧へ、R で最初から。入力フェーズでは効かせない。文章を打っている
+   最中に R でリロードが走ると、入力を受け付けていないようにしか見えない。 */
+document.addEventListener("keydown", function(e){
+  if(STATE === "idle" || document.activeElement === input) return;
+  if(e.key === "Enter" && STATE === "plain"){ e.preventDefault(); enterFogin(performance.now()); }
+  if(e.key === "r" || e.key === "R") location.reload();
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+   9. 起動
+   ══════════════════════════════════════════════════════════════════════ */
+function resize(){
+  DPR  = Math.min(window.devicePixelRatio || 1, 2.5);
+  cssW = window.innerWidth; cssH = window.innerHeight;
+  W = Math.round(cssW * DPR); H = Math.round(cssH * DPR);
+  if(W < 8 || H < 8) return;          /* 起動直後に 0×0 で呼ばれることがある */
+  glc.width = W; glc.height = H;
+  tc.width = W; tc.height = H;
+  layout();
+  paintAll();
+  if(gl){ resizeGL(); buildBlur(); }
+}
+
+function boot(){
+  if(!initGL()) return;
+  resize();
+  for(var i = 0; i < 300; i++) physics(0, 16.7);   /* 形を落ち着かせてから出す */
+  buildShape();
+  updateCount();
+  window.addEventListener("resize", function(){
+    if(STATE === "idle" || STATE === "end"){ resize(); fitInput(); }
+  });
+}
+
+/* https で置いたときだけ、自分自身を iPad の中にキャッシュする。
+   一度開けば、そのあとは電波が無くても動く（撮影現場で通信を当てにしないため）。
+   file:// や LAN の http では isSecureContext が false になるので何もしない。 */
+if("serviceWorker" in navigator && window.isSecureContext){
+  window.addEventListener("load", function(){
+    navigator.serviceWorker.register("sw.js").catch(function(){});
+  });
+}
+
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(boot).catch(boot);
+}else{
+  window.addEventListener("load", boot);
+}
+</script>
+</body>
+</html>
