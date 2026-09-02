@@ -8,7 +8,7 @@
    溜める。これをやらないと、圏外のとき明朝体が iOS 標準のものに
    差し替わって、行の折り返し位置が変わる。
    ══════════════════════════════════════════════════════════════════ */
-var CACHE = "mochimochi-v1";
+var CACHE = "mochimochi-v2";
 var CORE  = ["./", "./index.html"];
 
 self.addEventListener("install", function(e){
